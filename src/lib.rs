@@ -1,5 +1,8 @@
 use wasm_bindgen::prelude::*;
 
+// WebAudio AudioWorkletProcessor fixed block size
+const OFFSET: usize = 128;
+
 #[wasm_bindgen]
 pub struct RingBuffer {
   buffer: Vec<f32>,
@@ -14,13 +17,27 @@ pub struct RingBuffer {
 #[wasm_bindgen]
 impl RingBuffer {
   #[wasm_bindgen(constructor)]
+  /// Creates a new `RingBuffer`.
+  /// Underlying structure is a Vec<f32> with fixed size of some power-of-2
+  /// ```ignore
+  /// const rb = new RingBuffer(100) // creates a buffer of size 128
+  /// for (let i = 0; i < 200; i++) {
+  ///   rb.push(i);
+  ///   let n = rb.next();
+  ///   if (n)  { 
+  ///     console.log("Some(" + n + ")"); 
+  ///   } else { 
+  ///     console.log("None"); 
+  ///   } 
+  /// }
+  /// ```
   pub fn new(capacity: usize) -> Self {
     let mut x = 1;
     // force power-of-2-size buffer
     while x < capacity { x <<= 1; }
     Self {
       buffer: vec![0.0; x],
-      capacity,
+      capacity: x,
       bitmask: x - 1,
       r_ptr: 0,
       w_ptr: 0,
@@ -30,14 +47,27 @@ impl RingBuffer {
   }
 
   #[inline]
+  /// wrapping the read ptr
   fn wrap_read(&mut self, inc: usize) {
     self.r_ptr = (self.r_ptr + inc) & self.bitmask;
   }
   
   #[inline]
+  /// wrapping the write ptr
   fn wrap_write(&mut self, inc: usize) {
     self.w_ptr = (self.w_ptr + inc) & self.bitmask;
   }
+
+  /// gets size - debug purpose 
+  pub fn size(&self) -> usize { self.capacity }
+  /// gets read ptr position - debug purpose 
+  pub fn read_pos(&self) -> usize {self.r_ptr}
+  /// gets write ptr position - debug purpose 
+  pub fn write_pos(&self) -> usize {self.w_ptr}
+
+  /// set the options to overwrite data, which allows the read index to 
+  /// increment to make space for writing new data.
+  pub fn set_overwrite(&mut self, overwrite: bool) {self.overwrite = overwrite}
 
   /// Pushes a Vec<f32> onto the `RingBuffer` returns false if the buffer is 
   /// ''full´´ i.e the write index catches up to the read index.
@@ -81,6 +111,9 @@ impl RingBuffer {
   /// Retrieves the next value to be read from the buffer.
   /// Returns `undefined` if `Option::None` which happens when the read index
   /// catches up to write index
+  /// Increments the `read index` by `1` each function call, unless it catches up 
+  /// to `write index`
+  #[allow(clippy::should_implement_trait)]
   pub fn next(&mut self) -> Option<f32> {
     if self.r_ptr == self.w_ptr { return None }
     let out = self.buffer[self.r_ptr];
@@ -88,14 +121,11 @@ impl RingBuffer {
     Some(out)
   }
 
-  /// Gets value at a certain position in the buffer
-  pub fn get(&self, index: usize) -> Option<f32> {
-    if index >= self.capacity { return None }
-    Some(self.buffer[index])
-  }
-
+  /// Retrieves the next vector of values between the `read index` in the 
+  /// buffer and an offset. The offset is hardcoded to `128`, because of the
+  /// block size of the `AudioWorkletProcessor`
   pub fn next_block(&mut self) -> Option<Vec<f32>> {
-    let end = self.r_ptr + 128;
+    let end = self.r_ptr + OFFSET;
     if end < self.capacity {
       // if retrieved block crosses write pointer, return None
       if (self.r_ptr..end).contains(&self.w_ptr) { return None; }
@@ -110,9 +140,16 @@ impl RingBuffer {
       if x.contains(&self.w_ptr) || y.contains(&self.w_ptr) { return None; } 
       // concatinate to mend the discontinuity
       let slice = Some([&self.buffer[x], &self.buffer[y]].concat());
-      self.wrap_read(128);
+      self.wrap_read(OFFSET);
       slice
     }
+  }
+  
+  /// Gets value at a certain position in the buffer
+  /// Does not modify the read index.
+  pub fn get(&self, index: usize) -> Option<f32> {
+    if index >= self.capacity { return None }
+    Some(self.buffer[index])
   }
 }
 
