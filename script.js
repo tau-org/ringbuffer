@@ -3,10 +3,10 @@ import init, { RingBuffer } from './pkg/wasb_ringbuffer.js'
 console.log("hellp");
 async function main() {
   await init('./pkg/wasb_ringbuffer_bg.wasm');
-  const rb = new RingBuffer(100);
+  const rb = new RingBuffer(500);
   for (let i = 0; i < 200; i++) {
     rb.push(i);
-    let n = rb.next();
+    let n = rb.next_block();
     if (n)  { console.log("Some(" + n + ")");
     } else { console.log("None");
     }
