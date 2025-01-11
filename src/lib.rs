@@ -4,6 +4,7 @@ use wasm_bindgen::prelude::*;
 pub struct RingBuffer {
   buffer: Vec<f32>,
   capacity: usize,
+  bitmask: usize,
   r_ptr: usize,
   w_ptr: usize,
   full: bool,
@@ -14,14 +15,28 @@ pub struct RingBuffer {
 impl RingBuffer {
   #[wasm_bindgen(constructor)]
   pub fn new(capacity: usize) -> Self {
+    let mut x = 1;
+    // force power-of-2-size buffer
+    while x < capacity { x <<= 1; }
     Self {
-      buffer: vec![0.0; capacity],
+      buffer: vec![0.0; x],
       capacity,
+      bitmask: x - 1,
       r_ptr: 0,
       w_ptr: 0,
       full: false,
       overwrite: false
     }
+  }
+
+  #[inline]
+  fn wrap_read(&mut self, inc: usize) {
+    self.r_ptr = (self.r_ptr + inc) & self.bitmask;
+  }
+  
+  #[inline]
+  fn wrap_write(&mut self, inc: usize) {
+    self.w_ptr = (self.w_ptr + inc) & self.bitmask;
   }
 
   /// Pushes a Vec<f32> onto the `RingBuffer` returns false if the buffer is 
@@ -32,7 +47,7 @@ impl RingBuffer {
     for n in block {
       if self.full { return false }
       self.buffer[self.w_ptr % self.capacity] = n;
-      self.w_ptr+=1;
+      self.wrap_write(1);
       if self.w_ptr == self.r_ptr { 
         if self.overwrite {
           self.r_ptr = (self.r_ptr + 1) % self.capacity;
@@ -51,11 +66,11 @@ impl RingBuffer {
   pub fn push(&mut self, item: f32) -> bool {
     if self.full { return false }
     self.buffer[self.w_ptr] = item;
-    self.w_ptr = (self.w_ptr + 1) % self.capacity;
+    self.wrap_write(1);
     if self.w_ptr == self.r_ptr { 
       if self.overwrite {
         // make room for more by 'freeing' positions
-        self.r_ptr = (self.r_ptr + 1) % self.capacity;
+        self.wrap_read(1);
       } else {
         self.full = true 
       }
@@ -69,7 +84,7 @@ impl RingBuffer {
   pub fn next(&mut self) -> Option<f32> {
     if self.r_ptr == self.w_ptr { return None }
     let out = self.buffer[self.r_ptr];
-    self.r_ptr = (self.r_ptr + 1) % self.capacity;
+    self.wrap_read(1);
     Some(out)
   }
 
@@ -77,6 +92,27 @@ impl RingBuffer {
   pub fn get(&self, index: usize) -> Option<f32> {
     if index >= self.capacity { return None }
     Some(self.buffer[index])
+  }
+
+  pub fn next_block(&mut self) -> Option<Vec<f32>> {
+    let end = self.r_ptr + 128;
+    if end < self.capacity {
+      // if retrieved block crosses write pointer, return None
+      if (self.r_ptr..end).contains(&self.w_ptr) { return None; }
+      let slice = Some(self.buffer[self.r_ptr..(self.r_ptr+128)].to_vec());
+      // does not need wrapping since we have checked bounds 
+      self.r_ptr = end;
+      slice
+    } else {
+      let x = self.r_ptr..self.capacity;
+      let y = 0..(end%self.capacity);
+      // if retrieved block crosses write pointer, return None
+      if x.contains(&self.w_ptr) || y.contains(&self.w_ptr) { return None; } 
+      // concatinate to mend the discontinuity
+      let slice = Some([&self.buffer[x], &self.buffer[y]].concat());
+      self.wrap_read(128);
+      slice
+    }
   }
 }
 
