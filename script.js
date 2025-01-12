@@ -1,8 +1,8 @@
-import init, { RingBuffer } from './pkg/wasb_ringbuffer.js'
+import init, { RingBuffer } from './pkg/wasm_ringbuffer.js'
 
-console.log("hellp");
+console.log("hello");
 async function main() {
-  await init('./pkg/wasb_ringbuffer_bg.wasm');
+  await init('./pkg/wasm_ringbuffer_bg.wasm');
   const rb = new RingBuffer(500);
   for (let i = 0; i < 200; i++) {
     rb.push(i);
@@ -11,6 +11,8 @@ async function main() {
     } else { console.log("None");
     }
   }
-  console.log( rb.read_pos() + '\n' + rb.write_pos() + '\n' + "goofbye");
+  console.log( rb.read_pos() + '\n' + rb.write_pos() + '\n');
+  console.log("goofbye");
 }
+
 await main()
